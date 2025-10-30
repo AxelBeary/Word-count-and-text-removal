@@ -181,30 +181,47 @@ def subset_font(font_path, characters, output_dir, log_func):
             options.canonical_order = True
             return options
 
-        # 尝试作为字体集合 (TTC/OTC) 打开
+        # 先尝试作为单个字体文件打开（最常见的情况）
         try:
-            ttc = TTCollection(font_path)
-            log_func(f"  -> 检测到字体集合，包含 {len(ttc.fonts)} 个字重。将对所有字重进行瘦身。")
-            
-            for i, font in enumerate(ttc.fonts):
-                log_func(f"    -> 正在处理第 {i+1}/{len(ttc.fonts)} 个字重...")
-                subsetter = Subsetter(options=get_options())
-                subsetter.populate(text="".join(characters))
-                subsetter.subset(font)
-            
-            ttc.save(output_path)
-
-        except Exception as e:
-            # 如果作为集合打开失败，则作为单个字体文件处理
-            if "Cannot handle 'OTTO' fonts" in str(e) or "Not a TTC file" in str(e) or "Bad TTC header" in str(e):
+            font = TTFont(font_path)
+            # 检查是否实际上是字体集合文件
+            if hasattr(font.reader, 'numFonts') and font.reader.numFonts > 1:
+                # 是字体集合，需要重新用 TTCollection 处理
+                font.close()
+                ttc = TTCollection(font_path)
+                log_func(f"  -> 检测到字体集合，包含 {len(ttc.fonts)} 个字重。将对所有字重进行瘦身。")
+                
+                for i, font in enumerate(ttc.fonts):
+                    log_func(f"    -> 正在处理第 {i+1}/{len(ttc.fonts)} 个字重...")
+                    subsetter = Subsetter(options=get_options())
+                    subsetter.populate(text="".join(characters))
+                    subsetter.subset(font)
+                
+                ttc.save(output_path)
+            else:
+                # 是单个字体文件
                 log_func(f"  -> 作为单个字体文件处理。")
-                font = TTFont(font_path)
                 subsetter = Subsetter(options=get_options())
                 subsetter.populate(text="".join(characters))
                 subsetter.subset(font)
                 font.save(output_path)
-            else:
-                # 如果是其他未知错误，则向上抛出
+                
+        except Exception as e:
+            # 如果上述方法都失败，尝试直接用 TTCollection
+            try:
+                log_func(f"  -> 尝试作为字体集合处理...")
+                ttc = TTCollection(font_path)
+                log_func(f"  -> 检测到字体集合，包含 {len(ttc.fonts)} 个字重。")
+                
+                for i, font in enumerate(ttc.fonts):
+                    log_func(f"    -> 正在处理第 {i+1}/{len(ttc.fonts)} 个字重...")
+                    subsetter = Subsetter(options=get_options())
+                    subsetter.populate(text="".join(characters))
+                    subsetter.subset(font)
+                
+                ttc.save(output_path)
+            except Exception as e2:
+                # 两种方法都失败，抛出原始错误
                 raise e
 
         original_size = os.path.getsize(font_path) / 1024
